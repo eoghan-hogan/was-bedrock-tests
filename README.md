@@ -43,197 +43,43 @@ Interpret them like this:
 
 ## One-Time AWS Setup
 
-### 1. Set everything up in one copy-paste
+### 1. Run setup
 
-`cloudtrail-finder.sh` uses both CloudTrail and Bedrock model invocation logging. The block below sets up all of the AWS resources this repo expects:
+Use `./setup.sh` as the default setup path.
+
+```bash
+chmod +x setup.sh
+./setup.sh
+```
+
+`setup.sh` provisions or updates everything this repo needs:
 
 - a single-region CloudTrail trail in `eu-west-2`
-- the required CloudTrail S3 bucket policy
+- the CloudTrail S3 bucket and required bucket policy
 - a CloudWatch log group for Bedrock invocation logs
-- an IAM role that Bedrock can assume to write to that log group
-- the Bedrock invocation logging configuration itself
+- an IAM role and inline policy for Bedrock logging
+- the Bedrock model invocation logging configuration
 
 It also includes the fixes discovered during testing:
 
 - CloudTrail needs an explicit S3 bucket policy before `create-trail` works with an existing bucket
 - the correct flag is `--no-is-multi-region-trail`, not `--is-multi-region-trail false`
-- rerunning setup should tolerate already-existing resources
+- rerunning setup tolerates already-existing resources
+- Bedrock logging setup retries automatically because IAM propagation can lag briefly after role creation
 
-```bash
-set -euo pipefail
+Useful environment overrides:
 
-export AWS_REGION=eu-west-2
-export AWS_DEFAULT_REGION=eu-west-2
-export ACCOUNT_ID="$(aws sts get-caller-identity --query Account --output text)"
+- `AWS_REGION` defaults to `eu-west-2`
+- `TRAIL_NAME` defaults to `bedrock-residency-trail`
+- `TRAIL_BUCKET` defaults to `bedrock-residency-trail-<account>-<region>`
+- `BEDROCK_INVOCATION_LOG_GROUP` defaults to `bedrock-model-invocations`
+- `BEDROCK_LOGGING_ROLE_NAME` defaults to `AmazonBedrockModelInvocationLoggingRole`
+- `BEDROCK_LOGGING_SETUP_RETRIES` defaults to `8`
+- `BEDROCK_LOGGING_SETUP_SLEEP_SECONDS` defaults to `10`
 
-export TRAIL_NAME="bedrock-residency-trail"
-export TRAIL_BUCKET="bedrock-residency-trail-${ACCOUNT_ID}-eu-west-2"
-export TRAIL_ARN="arn:aws:cloudtrail:${AWS_REGION}:${ACCOUNT_ID}:trail/${TRAIL_NAME}"
+If you only need short-term testing, `aws cloudtrail lookup-events` can often work from CloudTrail event history without creating a dedicated trail. The dedicated trail is for retention and audit durability, and `setup.sh` configures it for you.
 
-export BEDROCK_INVOCATION_LOG_GROUP="bedrock-model-invocations"
-export BEDROCK_LOGGING_ROLE_NAME="AmazonBedrockModelInvocationLoggingRole"
-export BEDROCK_LOGGING_POLICY_NAME="AmazonBedrockModelInvocationLoggingPolicy"
-
-if ! aws s3api head-bucket --bucket "$TRAIL_BUCKET" 2>/dev/null; then
-  aws s3api create-bucket \
-    --bucket "$TRAIL_BUCKET" \
-    --create-bucket-configuration LocationConstraint="$AWS_REGION" \
-    --region "$AWS_REGION"
-fi
-
-cat > cloudtrail-bucket-policy.json <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Sid": "AWSCloudTrailAclCheck20150319",
-      "Effect": "Allow",
-      "Principal": { "Service": "cloudtrail.amazonaws.com" },
-      "Action": "s3:GetBucketAcl",
-      "Resource": "arn:aws:s3:::${TRAIL_BUCKET}",
-      "Condition": {
-        "StringEquals": {
-          "aws:SourceArn": "${TRAIL_ARN}"
-        }
-      }
-    },
-    {
-      "Sid": "AWSCloudTrailWrite20150319",
-      "Effect": "Allow",
-      "Principal": { "Service": "cloudtrail.amazonaws.com" },
-      "Action": "s3:PutObject",
-      "Resource": "arn:aws:s3:::${TRAIL_BUCKET}/AWSLogs/${ACCOUNT_ID}/*",
-      "Condition": {
-        "StringEquals": {
-          "s3:x-amz-acl": "bucket-owner-full-control",
-          "aws:SourceArn": "${TRAIL_ARN}"
-        }
-      }
-    }
-  ]
-}
-EOF
-
-aws s3api put-bucket-policy \
-  --bucket "$TRAIL_BUCKET" \
-  --policy file://cloudtrail-bucket-policy.json \
-  --region "$AWS_REGION"
-
-if ! aws cloudtrail describe-trails \
-  --trail-name-list "$TRAIL_NAME" \
-  --region "$AWS_REGION" \
-  --query 'trailList[0].Name' \
-  --output text 2>/dev/null | rg -qx "$TRAIL_NAME"; then
-  aws cloudtrail create-trail \
-    --name "$TRAIL_NAME" \
-    --s3-bucket-name "$TRAIL_BUCKET" \
-    --no-is-multi-region-trail \
-    --region "$AWS_REGION"
-fi
-
-aws cloudtrail start-logging \
-  --name "$TRAIL_NAME" \
-  --region "$AWS_REGION"
-
-if ! aws logs describe-log-groups \
-  --log-group-name-prefix "$BEDROCK_INVOCATION_LOG_GROUP" \
-  --region "$AWS_REGION" \
-  --query 'logGroups[?logGroupName==`'"$BEDROCK_INVOCATION_LOG_GROUP"'`].logGroupName' \
-  --output text | rg -qx "$BEDROCK_INVOCATION_LOG_GROUP"; then
-  aws logs create-log-group \
-    --log-group-name "$BEDROCK_INVOCATION_LOG_GROUP" \
-    --region "$AWS_REGION"
-fi
-
-cat > bedrock-logging-trust-policy.json <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Principal": {
-        "Service": "bedrock.amazonaws.com"
-      },
-      "Action": "sts:AssumeRole",
-      "Condition": {
-        "StringEquals": {
-          "aws:SourceAccount": "${ACCOUNT_ID}"
-        },
-        "ArnLike": {
-          "aws:SourceArn": "arn:aws:bedrock:${AWS_REGION}:${ACCOUNT_ID}:*"
-        }
-      }
-    }
-  ]
-}
-EOF
-
-if ! aws iam get-role --role-name "$BEDROCK_LOGGING_ROLE_NAME" >/dev/null 2>&1; then
-  aws iam create-role \
-    --role-name "$BEDROCK_LOGGING_ROLE_NAME" \
-    --assume-role-policy-document file://bedrock-logging-trust-policy.json >/dev/null
-else
-  aws iam update-assume-role-policy \
-    --role-name "$BEDROCK_LOGGING_ROLE_NAME" \
-    --policy-document file://bedrock-logging-trust-policy.json
-fi
-
-cat > bedrock-logging-role-policy.json <<EOF
-{
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "logs:CreateLogStream",
-        "logs:PutLogEvents"
-      ],
-      "Resource": "arn:aws:logs:${AWS_REGION}:${ACCOUNT_ID}:log-group:${BEDROCK_INVOCATION_LOG_GROUP}:log-stream:*"
-    }
-  ]
-}
-EOF
-
-aws iam put-role-policy \
-  --role-name "$BEDROCK_LOGGING_ROLE_NAME" \
-  --policy-name "$BEDROCK_LOGGING_POLICY_NAME" \
-  --policy-document file://bedrock-logging-role-policy.json
-
-export BEDROCK_LOGGING_ROLE_ARN="$(aws iam get-role \
-  --role-name "$BEDROCK_LOGGING_ROLE_NAME" \
-  --query 'Role.Arn' \
-  --output text)"
-
-cat > bedrock-logging-config.json <<EOF
-{
-  "loggingConfig": {
-    "cloudWatchConfig": {
-      "logGroupName": "${BEDROCK_INVOCATION_LOG_GROUP}",
-      "roleArn": "${BEDROCK_LOGGING_ROLE_ARN}"
-    },
-    "textDataDeliveryEnabled": true,
-    "imageDataDeliveryEnabled": false,
-    "embeddingDataDeliveryEnabled": false,
-    "videoDataDeliveryEnabled": false
-  }
-}
-EOF
-
-aws bedrock put-model-invocation-logging-configuration \
-  --cli-input-json file://bedrock-logging-config.json \
-  --region "$AWS_REGION"
-
-aws cloudtrail get-trail-status \
-  --name "$TRAIL_NAME" \
-  --region "$AWS_REGION"
-
-aws bedrock get-model-invocation-logging-configuration \
-  --region "$AWS_REGION"
-```
-
-If you only need short-term testing, `aws cloudtrail lookup-events` can often work from CloudTrail event history without creating a dedicated trail. The dedicated trail is for retention and audit durability.
-
-What matters for the probe is that your CloudTrail event JSON includes the Bedrock invocation entries you care about. Later, the helper script will look for fields such as:
+What matters for the probe is that your CloudTrail event JSON includes the Bedrock invocation entries you care about. Later, `cloudtrail-finder.sh` will look for fields such as:
 
 - `eventSource`
 - `eventName`
@@ -338,5 +184,21 @@ If `inferenceRegion` is absent on an in-region model ID such as `anthropic.claud
 - CloudTrail can lag behind the invocation by a few minutes, so rerun the helper with a larger `--lookback-minutes` window if needed.
 - Bedrock invocation logging must be enabled before you run the probe, otherwise the helper will only have CloudTrail evidence.
 - If you rerun setup and see `TrailAlreadyExistsException` or `ResourceAlreadyExistsException`, that is usually harmless. The copy-paste block above is written to avoid those in normal cases.
+- If `setup.sh` reports Bedrock log-group validation failures and then retries, that is usually IAM propagation delay rather than a broken role definition.
 - The `.env` file is treated as local-only configuration. Do not commit live bearer tokens or credentials.
-# was-bedrock-tests
+
+## Cleanup
+
+To remove the AWS resources created for this probe, use `./teardown.sh`.
+
+```bash
+chmod +x teardown.sh
+./teardown.sh
+```
+
+Useful options:
+
+- `./teardown.sh --delete-local-artifacts` also removes generated local probe and log files
+- `./teardown.sh --keep-trail-bucket` keeps the CloudTrail S3 bucket
+- `./teardown.sh --keep-log-group` keeps the Bedrock invocation CloudWatch log group
+- `./teardown.sh --keep-iam-role` keeps the Bedrock logging IAM role
