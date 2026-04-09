@@ -1,0 +1,61 @@
+{
+  "run_id": "39207c09-cc72-4487-84bb-56e3f5cb7f9c",
+  "timestamp": "2026-04-09T09:11:40.571336+00:00",
+  "source_region": "eu-west-2",
+  "endpoint_url": "https://bedrock-runtime.eu-west-2.amazonaws.com",
+  "using_bearer_token": true,
+  "results": [
+    {
+      "label": "Claude Sonnet 4.6 (In-Region)",
+      "model_id": "anthropic.claude-sonnet-4-6",
+      "inference_mode": "in-region",
+      "expected_success": true,
+      "matches_expectation": false,
+      "prompt": "Residency probe. run_id=39207c09-cc72-4487-84bb-56e3f5cb7f9c timestamp=2026-04-09T09:11:40.571336+00:00 source_region=eu-west-2 model=anthropic.claude-sonnet-4-6. Reply with exactly: ok",
+      "success": false,
+      "request_id": "80b3a6e7-ffb7-431d-9800-8bcab363df86",
+      "http_status": 403,
+      "error_code": "AccessDeniedException",
+      "error_message": "Authentication failed: Please make sure your API Key is valid."
+    },
+    {
+      "label": "Claude Sonnet 4.6 (EU profile)",
+      "model_id": "eu.anthropic.claude-sonnet-4-6",
+      "inference_mode": "eu-profile",
+      "expected_success": true,
+      "matches_expectation": false,
+      "prompt": "Residency probe. run_id=39207c09-cc72-4487-84bb-56e3f5cb7f9c timestamp=2026-04-09T09:11:40.571336+00:00 source_region=eu-west-2 model=eu.anthropic.claude-sonnet-4-6. Reply with exactly: ok",
+      "success": false,
+      "request_id": "cc95cfdb-059c-4171-8b7d-b4de2ef67668",
+      "http_status": 403,
+      "error_code": "AccessDeniedException",
+      "error_message": "Authentication failed: Please make sure your API Key is valid."
+    },
+    {
+      "label": "Claude Opus 4.6 (In-Region)",
+      "model_id": "anthropic.claude-opus-4-6-v1",
+      "inference_mode": "in-region",
+      "expected_success": false,
+      "matches_expectation": true,
+      "prompt": "Residency probe. run_id=39207c09-cc72-4487-84bb-56e3f5cb7f9c timestamp=2026-04-09T09:11:40.571336+00:00 source_region=eu-west-2 model=anthropic.claude-opus-4-6-v1. Reply with exactly: ok",
+      "success": false,
+      "request_id": "e8986219-cdcf-434d-bd09-feaf8dd5fe41",
+      "http_status": 403,
+      "error_code": "AccessDeniedException",
+      "error_message": "Authentication failed: Please make sure your API Key is valid."
+    },
+    {
+      "label": "Claude Opus 4.6 (EU profile)",
+      "model_id": "eu.anthropic.claude-opus-4-6-v1",
+      "inference_mode": "eu-profile",
+      "expected_success": true,
+      "matches_expectation": false,
+      "prompt": "Residency probe. run_id=39207c09-cc72-4487-84bb-56e3f5cb7f9c timestamp=2026-04-09T09:11:40.571336+00:00 source_region=eu-west-2 model=eu.anthropic.claude-opus-4-6-v1. Reply with exactly: ok",
+      "success": false,
+      "request_id": "b6bde341-3af1-4d85-9cb4-0c2509e4dd35",
+      "http_status": 403,
+      "error_code": "AccessDeniedException",
+      "error_message": "Authentication failed: Please make sure your API Key is valid."
+    }
+  ]
+}
